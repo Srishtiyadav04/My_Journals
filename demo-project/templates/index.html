@@ -3,37 +3,72 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>My Notes</title>
+  <title>My Journals</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; }
     input, textarea { width: 100%; box-sizing: border-box; padding: 0.5rem; margin-bottom: 0.5rem; font: inherit; }
     .note { border-bottom: 1px solid #ddd; padding: 0.6rem 0; }
     .meta { font-size: 0.8rem; color: #666; }
-    .error { color: #c0392b; }
+    .error { color: #c0392b; min-height: 1.2em; margin: 0.2rem 0; }
+    #chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
+    .chip { padding: 0.3rem 0.8rem; border: 1px solid #999; border-radius: 999px; background: #fff; cursor: pointer; }
+    .chip.on { background: #3b6cf6; color: #fff; border-color: #3b6cf6; }
+    .row { display: flex; gap: 0.4rem; }
+    .row input { margin-bottom: 0; }
   </style>
 </head>
 <body>
-  <h1>My Notes</h1>
+  <h1>My Journals</h1>
+
+  <div id="chips"></div>
+  <form id="journal-form" class="row">
+    <input id="journal-name" type="text" placeholder="New journal name" autocomplete="off">
+    <button type="submit">Create</button>
+  </form>
+  <p id="journal-error" class="error"></p>
 
   <form id="note-form">
     <input id="note-title" type="text" placeholder="Title" autocomplete="off">
     <textarea id="note-text" rows="3" placeholder="Write something..."></textarea>
-    <button type="submit">Add</button>
+    <button type="submit">Add note</button>
   </form>
   <p id="error" class="error"></p>
 
-  <p>Notes: <strong id="stat-total">0</strong> | Words: <strong id="stat-words">0</strong></p>
+  <p>All journals: <strong id="stat-total">0</strong> notes, <strong id="stat-words">0</strong> words</p>
 
   <div id="note-list"></div>
 
   <script>
-    const form = document.getElementById("note-form");
-    const titleInput = document.getElementById("note-title");
-    const textInput = document.getElementById("note-text");
-    const errorBox = document.getElementById("error");
+    let journals = [];
+    let activeId = null;
+
+    async function loadJournals() {
+      const response = await fetch("/api/journals/");
+      journals = await response.json();
+      if (!journals.some(j => j.id === activeId)) {
+        activeId = journals[0].id;
+      }
+      renderChips();
+    }
+
+    function renderChips() {
+      const box = document.getElementById("chips");
+      box.innerHTML = "";
+      for (const j of journals) {
+        const btn = document.createElement("button");
+        btn.className = "chip" + (j.id === activeId ? " on" : "");
+        btn.textContent = j.name;
+        btn.onclick = function () {
+          activeId = j.id;
+          renderChips();
+          loadNotes();
+        };
+        box.append(btn);
+      }
+    }
 
     async function loadNotes() {
-      const response = await fetch("/api/notes/");
+      const response = await fetch("/api/notes/?journal_id=" + activeId);
       const notes = await response.json();
 
       const list = document.getElementById("note-list");
@@ -71,19 +106,49 @@
       document.getElementById("stat-words").textContent = stats.total_words;
     }
 
-    function refresh() {
+    async function refresh() {
+      await loadJournals();
       loadNotes();
       loadStats();
     }
 
-    form.addEventListener("submit", async function (event) {
+    document.getElementById("journal-form").addEventListener("submit", async function (event) {
       event.preventDefault();
+      const nameInput = document.getElementById("journal-name");
+      const errorBox = document.getElementById("journal-error");
+      errorBox.textContent = "";
+
+      const response = await fetch("/api/journals/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nameInput.value }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        errorBox.textContent = data.error;
+        return;
+      }
+      nameInput.value = "";
+      activeId = data.id;
+      refresh();
+    });
+
+    document.getElementById("note-form").addEventListener("submit", async function (event) {
+      event.preventDefault();
+      const titleInput = document.getElementById("note-title");
+      const textInput = document.getElementById("note-text");
+      const errorBox = document.getElementById("error");
       errorBox.textContent = "";
 
       const response = await fetch("/api/notes/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: titleInput.value, text: textInput.value }),
+        body: JSON.stringify({
+          title: titleInput.value,
+          text: textInput.value,
+          journal_id: activeId,
+        }),
       });
 
       if (!response.ok) {
@@ -91,7 +156,6 @@
         errorBox.textContent = data.error;
         return;
       }
-
       titleInput.value = "";
       textInput.value = "";
       refresh();
