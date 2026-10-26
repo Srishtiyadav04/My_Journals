@@ -1,24 +1,52 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>My Journals</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; }
-    input, textarea { width: 100%; box-sizing: border-box; padding: 0.5rem; margin-bottom: 0.5rem; font: inherit; }
-    .note { border-bottom: 1px solid #ddd; padding: 0.6rem 0; }
-    .meta { font-size: 0.8rem; color: #666; }
-    .error { color: #c0392b; min-height: 1.2em; margin: 0.2rem 0; }
+    :root {
+      --bg: #ffffff; --card: #f4f4f1; --text: #2c2c2a; --sub: #5f5e5a;
+      --line: #d3d1c7; --accent: #3b6cf6; --on: #ffffff; --err: #c0392b;
+    }
+    [hidden] { display: none !important; }
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; background: var(--bg); color: var(--text); }
+    input[type="text"], textarea, select { width: 100%; box-sizing: border-box; padding: 0.5rem; margin-bottom: 0.5rem; font: inherit; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+    button { font: inherit; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 0.35rem 0.8rem; cursor: pointer; }
+    .note { border-bottom: 1px solid var(--line); padding: 0.6rem 0; }
+    .note-title { line-height: 1.3; }
+    .meta { font-size: 0.8rem; color: var(--sub); margin: 0.2rem 0 0.3rem; }
+    .note-text { line-height: 1.5; margin-bottom: 0.5rem; white-space: pre-wrap; }
+    .error { color: var(--err); min-height: 1.2em; margin: 0.2rem 0; }
     #chips { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.6rem; }
-    .chip { padding: 0.3rem 0.8rem; border: 1px solid #999; border-radius: 999px; background: #fff; cursor: pointer; }
-    .chip.on { background: #3b6cf6; color: #fff; border-color: #3b6cf6; }
+    .chip { border-radius: 999px; }
+    .chip.on { background: var(--accent); color: var(--on); border-color: var(--accent); }
     .row { display: flex; gap: 0.4rem; }
     .row input { margin-bottom: 0; }
+    details { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 0.6rem 0.8rem; margin: 0.6rem 0; }
+    summary { cursor: pointer; font-weight: 500; }
+    .theme-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.5rem; margin-top: 0.6rem; }
+    .theme-btn { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 10px; border-radius: 8px; border-width: 2px; border-style: solid; text-align: left; }
+    .theme-btn.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .theme-dots span { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 4px; border: 1px solid rgba(128, 128, 128, 0.5); }
+    .style-box { display: grid; gap: 0.5rem; margin: 0.3rem 0 0.6rem; padding: 0.6rem; background: var(--card); border: 1px solid var(--line); border-radius: 8px; font-size: 0.9rem; }
+    .style-box label { display: block; color: var(--sub); }
+    .style-box select { margin: 0.2rem 0 0; }
+    .style-box input[type="range"] { width: 100%; }
+    .group-title { font-weight: 500; margin: 0.6rem 0 0.2rem; }
+    .swatches { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.2rem; }
+    .swatch { width: 26px; height: 26px; border-radius: 50%; padding: 0; border: 2px solid var(--line); }
+    .swatch.on { outline: 2px solid var(--accent); outline-offset: 2px; }
+    input[type="color"] { width: 34px; height: 30px; padding: 0; border: 1px solid var(--line); background: none; }
   </style>
 </head>
 <body>
   <h1>My Journals</h1>
+
+  <details>
+    <summary>Theme</summary>
+    <div id="theme-grid" class="theme-grid"></div>
+  </details>
 
   <div id="chips"></div>
   <form id="journal-form" class="row">
@@ -30,6 +58,10 @@
   <form id="note-form">
     <input id="note-title" type="text" placeholder="Title" autocomplete="off">
     <textarea id="note-text" rows="3" placeholder="Write something..."></textarea>
+    <details>
+      <summary>Style this note</summary>
+      <div id="composer-style"></div>
+    </details>
     <button type="submit">Add note</button>
   </form>
   <p id="error" class="error"></p>
@@ -39,6 +71,230 @@
   <div id="note-list"></div>
 
   <script>
+    const THEMES = {
+      light:    { label: "Light",         dark: false, bg: "#ffffff", card: "#f4f4f1", text: "#2c2c2a", sub: "#5f5e5a", line: "#d3d1c7", accent: "#3b6cf6", on: "#ffffff", err: "#c0392b" },
+      dark:     { label: "Dark",          dark: true,  bg: "#1f1f1e", card: "#2c2c2a", text: "#f1efe8", sub: "#b4b2a9", line: "#444441", accent: "#85b7eb", on: "#042c53", err: "#f09595" },
+      midnight: { label: "Midnight",      dark: true,  bg: "#0f172a", card: "#1e293b", text: "#e2e8f0", sub: "#94a3b8", line: "#334155", accent: "#818cf8", on: "#1e1b4b", err: "#fca5a5" },
+      sepia:    { label: "Sepia",         dark: false, bg: "#f6efe0", card: "#ece1c8", text: "#433422", sub: "#7a6548", line: "#d6c7a3", accent: "#9a5b13", on: "#ffffff", err: "#a32d2d" },
+      forest:   { label: "Forest",        dark: false, bg: "#f1f6ef", card: "#e0ebdc", text: "#1f3326", sub: "#4f6b57", line: "#bcd2b8", accent: "#2f7d4f", on: "#ffffff", err: "#b3261e" },
+      ocean:    { label: "Ocean",         dark: false, bg: "#eef6fb", card: "#dcecf7", text: "#12324a", sub: "#4a6a82", line: "#b5d3e6", accent: "#1769aa", on: "#ffffff", err: "#b3261e" },
+      rose:     { label: "Rose",          dark: false, bg: "#fdf1f4", card: "#f8e0e7", text: "#3d1f2a", sub: "#7a4a5a", line: "#efc3cf", accent: "#c2185b", on: "#ffffff", err: "#b3261e" },
+      lavender: { label: "Lavender",      dark: false, bg: "#f4f1fb", card: "#e7e0f5", text: "#2a2342", sub: "#5d5480", line: "#cfc5e8", accent: "#6a4fc4", on: "#ffffff", err: "#b3261e" },
+      sunset:   { label: "Sunset",        dark: true,  bg: "#2a1a14", card: "#3b2820", text: "#fbeadf", sub: "#d2ab98", line: "#5a3d31", accent: "#ff9a62", on: "#3b1a08", err: "#ffb4a8" },
+      contrast: { label: "High contrast", dark: true,  bg: "#000000", card: "#111111", text: "#ffffff", sub: "#d0d0d0", line: "#ffffff", accent: "#ffd400", on: "#000000", err: "#ff8a80" },
+    };
+    const THEME_VARS = {
+      bg: "--bg", card: "--card", text: "--text", sub: "--sub",
+      line: "--line", accent: "--accent", on: "--on", err: "--err",
+    };
+
+    const FONTS = {
+      sans: "system-ui, sans-serif",
+      serif: "Georgia, 'Times New Roman', serif",
+      book: "Palatino, 'Palatino Linotype', 'Book Antiqua', serif",
+      mono: "ui-monospace, Menlo, monospace",
+      cursive: "'Snell Roundhand', 'Segoe Script', 'Comic Sans MS', cursive",
+      rounded: "ui-rounded, 'SF Pro Rounded', system-ui, sans-serif",
+    };
+    const FONT_LABELS = {
+      sans: "Sans", serif: "Serif", book: "Book", mono: "Mono",
+      cursive: "Handwritten", rounded: "Rounded",
+    };
+    const SWATCHES = ["", "#D85A30", "#E24B4A", "#BA7517", "#639922",
+                      "#1D9E75", "#378ADD", "#7F77DD", "#D4537E", "#888780"];
+
+    const errorBox = document.getElementById("error");
+
+    let theme = "light";
+    try {
+      const saved = localStorage.getItem("journalTheme");
+      if (saved && THEMES[saved]) theme = saved;
+    } catch (e) {}
+
+    function applyTheme() {
+      const t = THEMES[theme];
+      const root = document.documentElement;
+      root.dataset.theme = theme;
+      for (const key of Object.keys(THEME_VARS)) {
+        root.style.setProperty(THEME_VARS[key], t[key]);
+      }
+      root.style.colorScheme = t.dark ? "dark" : "light";
+      document.querySelectorAll(".theme-btn").forEach(function (b) {
+        const on = b.dataset.theme === theme;
+        b.classList.toggle("on", on);
+        b.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+    }
+
+    function buildThemeButtons() {
+      const grid = document.getElementById("theme-grid");
+      for (const key of Object.keys(THEMES)) {
+        const t = THEMES[key];
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "theme-btn";
+        btn.dataset.theme = key;
+        btn.style.background = t.bg;
+        btn.style.color = t.text;
+        btn.style.borderColor = t.line;
+
+        const name = document.createElement("span");
+        name.textContent = t.label;
+
+        const dots = document.createElement("span");
+        dots.className = "theme-dots";
+        for (const colour of [t.accent, t.text, t.card]) {
+          const d = document.createElement("span");
+          d.style.background = colour;
+          dots.append(d);
+        }
+
+        btn.append(name, dots);
+        btn.onclick = function () {
+          theme = key;
+          applyTheme();
+          try { localStorage.setItem("journalTheme", theme); } catch (err) {}
+        };
+        grid.append(btn);
+      }
+    }
+
+    buildThemeButtons();
+    applyTheme();
+
+    function applyText(el, s) {
+      el.style.fontFamily = FONTS[s.font] || FONTS.sans;
+      el.style.fontSize = s.size + "px";
+      el.style.color = s.color || "";
+    }
+
+    function applyTitle(el, s) {
+      applyText(el, s);
+      el.style.fontWeight = s.bold ? "700" : "400";
+    }
+
+    function buildStyleControls(style, preview, commit, opts) {
+      const box = document.createElement("div");
+      box.className = "style-box";
+
+      const fontLabel = document.createElement("label");
+      fontLabel.textContent = "Font";
+      const fontSel = document.createElement("select");
+      for (const key of Object.keys(FONTS)) {
+        const opt = document.createElement("option");
+        opt.value = key;
+        opt.textContent = FONT_LABELS[key];
+        fontSel.append(opt);
+      }
+      fontSel.value = style.font;
+      fontSel.onchange = function () {
+        style.font = fontSel.value;
+        preview(style);
+        commit();
+      };
+      fontLabel.append(fontSel);
+
+      const sizeLabel = document.createElement("label");
+      const sizeOut = document.createElement("span");
+      sizeOut.textContent = style.size;
+      sizeLabel.append("Size: ", sizeOut, " px");
+      const range = document.createElement("input");
+      range.type = "range";
+      range.min = opts.min; range.max = opts.max; range.step = 1;
+      range.value = style.size;
+      range.oninput = function () {
+        style.size = Number(range.value);
+        sizeOut.textContent = style.size;
+        preview(style);
+      };
+      range.onchange = function () { commit(); };
+      sizeLabel.append(range);
+
+      const colorLabel = document.createElement("label");
+      colorLabel.append("Colour");
+      const swatchRow = document.createElement("div");
+      swatchRow.className = "swatches";
+      const picker = document.createElement("input");
+      picker.type = "color";
+      picker.value = style.color || "#000000";
+      picker.setAttribute("aria-label", "Custom colour");
+
+      function markSwatches() {
+        swatchRow.querySelectorAll(".swatch").forEach(function (b) {
+          b.classList.toggle("on", b.dataset.col === style.color);
+        });
+      }
+      for (const col of SWATCHES) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "swatch";
+        b.dataset.col = col;
+        b.style.background = col || "var(--text)";
+        b.setAttribute("aria-label", col ? "Colour " + col : "Default colour");
+        b.onclick = function () {
+          style.color = col;
+          if (col) picker.value = col;
+          markSwatches();
+          preview(style);
+          commit();
+        };
+        swatchRow.append(b);
+      }
+      picker.oninput = function () {
+        style.color = picker.value;
+        markSwatches();
+        preview(style);
+      };
+      picker.onchange = function () { commit(); };
+      swatchRow.append(picker);
+      colorLabel.append(swatchRow);
+      markSwatches();
+
+      box.append(fontLabel, sizeLabel, colorLabel);
+
+      if (opts.bold) {
+        const boldLabel = document.createElement("label");
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = style.bold;
+        cb.onchange = function () {
+          style.bold = cb.checked;
+          preview(style);
+          commit();
+        };
+        boldLabel.append(cb, " Bold");
+        box.append(boldLabel);
+      }
+      return box;
+    }
+
+    function buildAllControls(titleStyle, bodyStyle, previewTitle, previewBody, commit) {
+      const wrap = document.createElement("div");
+      const h1 = document.createElement("div");
+      h1.className = "group-title";
+      h1.textContent = "Title style";
+      const h2 = document.createElement("div");
+      h2.className = "group-title";
+      h2.textContent = "Text style";
+      wrap.append(
+        h1, buildStyleControls(titleStyle, previewTitle, commit, { min: 14, max: 48, bold: true }),
+        h2, buildStyleControls(bodyStyle, previewBody, commit, { min: 12, max: 32, bold: false })
+      );
+      return wrap;
+    }
+
+    const composerTitle = { font: "sans", size: 20, color: "", bold: true };
+    const composerBody = { font: "sans", size: 16, color: "" };
+    const titleInput = document.getElementById("note-title");
+    const textInput = document.getElementById("note-text");
+    function previewComposerTitle(s) { applyTitle(titleInput, s); }
+    function previewComposerBody(s) { applyText(textInput, s); }
+    document.getElementById("composer-style").append(
+      buildAllControls(composerTitle, composerBody, previewComposerTitle, previewComposerBody, function () {})
+    );
+    previewComposerTitle(composerTitle);
+    previewComposerBody(composerBody);
+
     let journals = [];
     let activeId = null;
 
@@ -77,24 +333,61 @@
         const div = document.createElement("div");
         div.className = "note";
 
-        const title = document.createElement("strong");
+        const titleStyle = {
+          font: note.title_font, size: note.title_size,
+          color: note.title_color, bold: Boolean(note.title_bold),
+        };
+        const bodyStyle = { font: note.font, size: note.size, color: note.color };
+
+        const title = document.createElement("div");
+        title.className = "note-title";
         title.textContent = note.title;
+        applyTitle(title, titleStyle);
 
         const meta = document.createElement("div");
         meta.className = "meta";
         meta.textContent = new Date(note.created_at).toLocaleString();
 
         const body = document.createElement("div");
+        body.className = "note-text";
         body.textContent = note.text;
+        applyText(body, bodyStyle);
 
-        const btn = document.createElement("button");
-        btn.textContent = "Delete";
-        btn.onclick = async function () {
+        const controls = buildAllControls(
+          titleStyle, bodyStyle,
+          function (s) { applyTitle(title, s); },
+          function (s) { applyText(body, s); },
+          async function () {
+            errorBox.textContent = "";
+            const r = await fetch("/api/notes/" + note.id + "/style", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                font: bodyStyle.font, size: bodyStyle.size, color: bodyStyle.color,
+                title_font: titleStyle.font, title_size: titleStyle.size,
+                title_color: titleStyle.color, title_bold: titleStyle.bold,
+              }),
+            });
+            if (!r.ok) {
+              const d = await r.json();
+              errorBox.textContent = d.error;
+            }
+          }
+        );
+        controls.hidden = true;
+
+        const styleBtn = document.createElement("button");
+        styleBtn.textContent = "Style";
+        styleBtn.onclick = function () { controls.hidden = !controls.hidden; };
+
+        const delBtn = document.createElement("button");
+        delBtn.textContent = "Delete";
+        delBtn.onclick = async function () {
           await fetch("/api/notes/" + note.id, { method: "DELETE" });
           refresh();
         };
 
-        div.append(title, meta, body, btn);
+        div.append(title, meta, body, controls, styleBtn, " ", delBtn);
         list.append(div);
       }
     }
@@ -115,8 +408,8 @@
     document.getElementById("journal-form").addEventListener("submit", async function (event) {
       event.preventDefault();
       const nameInput = document.getElementById("journal-name");
-      const errorBox = document.getElementById("journal-error");
-      errorBox.textContent = "";
+      const jErr = document.getElementById("journal-error");
+      jErr.textContent = "";
 
       const response = await fetch("/api/journals/", {
         method: "POST",
@@ -126,7 +419,7 @@
       const data = await response.json();
 
       if (!response.ok) {
-        errorBox.textContent = data.error;
+        jErr.textContent = data.error;
         return;
       }
       nameInput.value = "";
@@ -136,9 +429,6 @@
 
     document.getElementById("note-form").addEventListener("submit", async function (event) {
       event.preventDefault();
-      const titleInput = document.getElementById("note-title");
-      const textInput = document.getElementById("note-text");
-      const errorBox = document.getElementById("error");
       errorBox.textContent = "";
 
       const response = await fetch("/api/notes/", {
@@ -148,6 +438,13 @@
           title: titleInput.value,
           text: textInput.value,
           journal_id: activeId,
+          font: composerBody.font,
+          size: composerBody.size,
+          color: composerBody.color,
+          title_font: composerTitle.font,
+          title_size: composerTitle.size,
+          title_color: composerTitle.color,
+          title_bold: composerTitle.bold,
         }),
       });
 
