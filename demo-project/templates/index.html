@@ -2,25 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>My Notes</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; }
+    input, textarea { width: 100%; box-sizing: border-box; padding: 0.5rem; margin-bottom: 0.5rem; font: inherit; }
+    .note { border-bottom: 1px solid #ddd; padding: 0.6rem 0; }
+    .meta { font-size: 0.8rem; color: #666; }
+    .error { color: #c0392b; }
+  </style>
 </head>
 <body>
   <h1>My Notes</h1>
 
   <form id="note-form">
-    <input id="note-input" type="text" placeholder="Write a note..." autocomplete="off">
+    <input id="note-title" type="text" placeholder="Title" autocomplete="off">
+    <textarea id="note-text" rows="3" placeholder="Write something..."></textarea>
     <button type="submit">Add</button>
   </form>
-  <p id="error" style="color: red;"></p>
+  <p id="error" class="error"></p>
 
-  <p>Notes: <strong id="stat-total">0</strong></p>
-  <p>Words: <strong id="stat-words">0</strong></p>
+  <p>Notes: <strong id="stat-total">0</strong> | Words: <strong id="stat-words">0</strong></p>
 
-  <ul id="note-list"></ul>
+  <div id="note-list"></div>
 
   <script>
     const form = document.getElementById("note-form");
-    const input = document.getElementById("note-input");
+    const titleInput = document.getElementById("note-title");
+    const textInput = document.getElementById("note-text");
     const errorBox = document.getElementById("error");
 
     async function loadNotes() {
@@ -30,16 +39,34 @@
       const list = document.getElementById("note-list");
       list.innerHTML = "";
       for (const note of notes) {
-        const li = document.createElement("li");
-        li.textContent = note.text;
-        list.append(li);
+        const div = document.createElement("div");
+        div.className = "note";
+
+        const title = document.createElement("strong");
+        title.textContent = note.title;
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.textContent = new Date(note.created_at).toLocaleString();
+
+        const body = document.createElement("div");
+        body.textContent = note.text;
+
+        const btn = document.createElement("button");
+        btn.textContent = "Delete";
+        btn.onclick = async function () {
+          await fetch("/api/notes/" + note.id, { method: "DELETE" });
+          refresh();
+        };
+
+        div.append(title, meta, body, btn);
+        list.append(div);
       }
     }
 
     async function loadStats() {
       const response = await fetch("/api/stats/");
       const stats = await response.json();
-
       document.getElementById("stat-total").textContent = stats.total_notes;
       document.getElementById("stat-words").textContent = stats.total_words;
     }
@@ -56,7 +83,7 @@
       const response = await fetch("/api/notes/", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: input.value }),
+        body: JSON.stringify({ title: titleInput.value, text: textInput.value }),
       });
 
       if (!response.ok) {
@@ -65,7 +92,8 @@
         return;
       }
 
-      input.value = "";
+      titleInput.value = "";
+      textInput.value = "";
       refresh();
     });
 

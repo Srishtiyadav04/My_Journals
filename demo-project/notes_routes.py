@@ -12,10 +12,11 @@ def list_notes():
 @notes_bp.route("/", methods=["POST"])
 def create_note():
     data = request.get_json()
+    title = (data.get("title") or "").strip()
     text = (data.get("text") or "").strip()
-    if not text:
-        return jsonify({"error": "Note cannot be empty"}), 400
-    return jsonify(add_note(text)), 201
+    if not title:
+        return jsonify({"error": "Title cannot be empty"}), 400
+    return jsonify(add_note(title, text)), 201
 
 
 @notes_bp.route("/<int:note_id>", methods=["DELETE"])
