@@ -1,8 +1,10 @@
 from flask import Flask, render_template        # add render_template
 from notes_routes import notes_bp
 from stats_routes import stats_bp
+from storage import init_db
 
 app = Flask(__name__)
+init_db()
 
 app.register_blueprint(notes_bp, url_prefix="/api/notes")
 app.register_blueprint(stats_bp, url_prefix="/api/stats")

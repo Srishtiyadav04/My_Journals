@@ -1,26 +1,24 @@
 from flask import Blueprint, jsonify, request
+from storage import get_notes, add_note, delete_note
 
 notes_bp = Blueprint("notes", __name__)
 
-# a temporary list; it resets when the server restarts
-notes = [
-    {"id": 1, "text": "First note"},
-    {"id": 2, "text": "Second note"},
-]
 
 @notes_bp.route("/")
 def list_notes():
-    return jsonify(notes)
+    return jsonify(get_notes())
+
 
 @notes_bp.route("/", methods=["POST"])
-def add_note():
+def create_note():
     data = request.get_json()
     text = (data.get("text") or "").strip()
-
     if not text:
         return jsonify({"error": "Note cannot be empty"}), 400
+    return jsonify(add_note(text)), 201
 
-    new_id = max((n["id"] for n in notes), default=0) + 1
-    note = {"id": new_id, "text": text}
-    notes.append(note)
-    return jsonify(note), 201
+
+@notes_bp.route("/<int:note_id>", methods=["DELETE"])
+def remove_note(note_id):
+    delete_note(note_id)
+    return jsonify({"deleted": note_id})
