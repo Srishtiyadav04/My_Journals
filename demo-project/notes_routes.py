@@ -1,7 +1,8 @@
 import re
 from flask import Blueprint, jsonify, request
 from storage import (
-    get_notes, add_note, delete_note, journal_exists, update_note_style,
+    get_notes, add_note, delete_note, journal_exists,
+    update_note_style, update_note_text,
 )
 
 notes_bp = Blueprint("notes", __name__)
@@ -65,6 +66,18 @@ def create_note():
         return jsonify({"error": error}), 400
 
     return jsonify(add_note(journal_id, title, text, style)), 201
+
+
+@notes_bp.route("/<int:note_id>", methods=["PATCH"])
+def edit_note(note_id):
+    data = request.get_json() or {}
+    title = (data.get("title") or "").strip()
+    text = (data.get("text") or "").strip()
+    if not title:
+        return jsonify({"error": "Title cannot be empty"}), 400
+    if not update_note_text(note_id, title, text):
+        return jsonify({"error": "Note not found"}), 404
+    return jsonify({"id": note_id, "title": title, "text": text})
 
 
 @notes_bp.route("/<int:note_id>/style", methods=["PATCH"])

@@ -41,7 +41,9 @@ def init_db():
         for name, definition in STYLE_COLUMNS.items():
             if name not in existing:
                 conn.execute(f"ALTER TABLE notes ADD COLUMN {name} {definition}")
-        conn.execute("INSERT OR IGNORE INTO journals (name) VALUES ('Personal')")
+        count = conn.execute("SELECT COUNT(*) FROM journals").fetchone()[0]
+        if count == 0:
+            conn.execute("INSERT INTO journals (name) VALUES ('Personal')")
 
 
 def get_journals():
@@ -63,6 +65,24 @@ def add_journal(name):
             return {"id": cur.lastrowid, "name": name}
     except sqlite3.IntegrityError:
         return None
+
+
+def rename_journal(journal_id, name):
+    try:
+        with get_db() as conn:
+            cur = conn.execute(
+                "UPDATE journals SET name = ? WHERE id = ?", (name, journal_id)
+            )
+            return "ok" if cur.rowcount > 0 else "missing"
+    except sqlite3.IntegrityError:
+        return "exists"
+
+
+def delete_journal(journal_id):
+    with get_db() as conn:
+        conn.execute("DELETE FROM notes WHERE journal_id = ?", (journal_id,))
+        cur = conn.execute("DELETE FROM journals WHERE id = ?", (journal_id,))
+        return cur.rowcount > 0
 
 
 def get_notes(journal_id=None):
@@ -93,6 +113,14 @@ def add_note(journal_id, title, text, style):
             "id": cur.lastrowid, "journal_id": journal_id, "title": title,
             "text": text, "created_at": created_at, **style,
         }
+
+
+def update_note_text(note_id, title, text):
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE notes SET title = ?, text = ? WHERE id = ?", (title, text, note_id)
+        )
+        return cur.rowcount > 0
 
 
 def update_note_style(note_id, style):

@@ -337,6 +337,9 @@
       applyTheme();
 
       const list = h("div", "list");
+      if (j.data.length === 0) {
+        list.append(h("p", "sub", "No journals yet. Create one below."));
+      }
       for (const journal of j.data) {
         const a = h("a", "card");
         a.href = "#/j/" + journal.id;
@@ -382,8 +385,7 @@
           plural(s.data.total_words, "word")));
       }
     }
-
-    async function showJournal(jid) {
+        async function showJournal(jid) {
       const id = ++renderId;
       app.textContent = "";
       const [j, n] = await Promise.all([
@@ -396,119 +398,109 @@
       app.append(backLink("#/", "All journals"));
       app.append(h("h1", "", journal.name));
 
+      const notes = (n.ok && Array.isArray(n.data)) ? n.data : [];
+
       const add = h("a", "btn", "New note");
       add.href = "#/j/" + jid + "/new";
-      app.append(add);
+      const renameBtn = h("button", "", "Rename");
+      const deleteBtn = h("button", "", "Delete journal");
+      const actions = h("div", "actions");
+      actions.append(add, renameBtn, deleteBtn);
+      app.append(actions);
 
-      const notes = (n.ok && n.data) || [];
+      const renameForm = h("form", "row");
+      renameForm.hidden = true;
+      const nameInput = document.createElement("input");
+      nameInput.type = "text";
+      nameInput.value = journal.name;
+      nameInput.maxLength = 60;
+      nameInput.autocomplete = "off";
+      const saveName = h("button", "primary", "Save");
+      saveName.type = "submit";
+      const cancelName = h("button", "", "Cancel");
+      cancelName.type = "button";
+      renameForm.append(nameInput, saveName, cancelName);
+      const err = h("p", "error");
+      app.append(renameForm, err);
+
+      renameBtn.onclick = function () {
+        renameForm.hidden = false;
+        nameInput.focus();
+        nameInput.select();
+      };
+      cancelName.onclick = function () {
+        renameForm.hidden = true;
+        nameInput.value = journal.name;
+        err.textContent = "";
+      };
+      renameForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        err.textContent = "";
+        const r = await api("/api/journals/" + jid, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: nameInput.value }),
+        });
+        if (!r.ok) {
+          err.textContent = (r.data && r.data.error) || "Couldn't rename the journal";
+          return;
+        }
+        showJournal(jid);
+      });
+
+      deleteBtn.onclick = async function () {
+        const msg = notes.length
+          ? 'Delete "' + journal.name + '" and its ' + plural(notes.length, "note") + "? This can't be undone."
+          : 'Delete "' + journal.name + '"?';
+        if (!window.confirm(msg)) return;
+        const r = await api("/api/journals/" + jid, { method: "DELETE" });
+        if (!r.ok) {
+          err.textContent = (r.data && r.data.error) || "Couldn't delete the journal";
+          return;
+        }
+        location.hash = "#/";
+      };
+
+      if (!n.ok) {
+        app.append(h("p", "error", "Couldn't load notes: " + ((n.data && n.data.error) || "server error")));
+      }
+
       const list = h("div", "list");
+      app.append(list);
       if (notes.length === 0) {
         list.append(h("p", "sub", "No notes yet. Start with New note."));
       }
+
       for (const note of notes) {
-        const a = h("a", "card");
-        a.href = "#/j/" + jid + "/n/" + note.id;
+        try {
+          const a = h("a", "card");
+          a.href = "#/j/" + jid + "/n/" + note.id;
 
-        const noteImages = note.images || [];
-        if (noteImages.length) {
-          const t = document.createElement("img");
-          t.className = "thumb";
-          t.src = noteImages[0].url;
-          t.alt = "";
-          t.loading = "lazy";
-          a.append(t);
+          const noteImages = note.images || [];
+          if (noteImages.length) {
+            const t = document.createElement("img");
+            t.className = "thumb";
+            t.src = noteImages[0].url;
+            t.alt = "";
+            t.loading = "lazy";
+            a.append(t);
+          }
+
+          const text = note.text || "";
+          const snippet = text.length > 120 ? text.slice(0, 120) + "\u2026" : text;
+          const grow = h("div", "grow");
+          grow.append(
+            h("strong", "", note.title),
+            h("span", "sub", new Date(note.created_at).toLocaleString()),
+            h("div", "snippet", snippet)
+          );
+          a.append(grow, h("span", "go", "\u203A"));
+          list.append(a);
+        } catch (e) {
+          console.error(e);
+          list.append(h("p", "error", "Couldn't show note " + note.id));
         }
-
-        const grow = h("div", "grow");
-        const snippet = note.text.length > 120 ? note.text.slice(0, 120) + "\u2026" : note.text;
-        grow.append(
-          h("strong", "", note.title),
-          h("span", "sub", new Date(note.created_at).toLocaleString()),
-          h("div", "snippet", snippet)
-        );
-        a.append(grow, h("span", "go", "\u203A"));
-        list.append(a);
       }
-      app.append(list);
-    }
-
-    async function showNewNote(jid) {
-      const id = ++renderId;
-      app.textContent = "";
-      const j = await api("/api/journals/");
-      if (id !== renderId) return;
-      const journal = ((j.data) || []).find(function (x) { return x.id === jid; });
-      if (!journal) { showMessage("That journal doesn't exist."); return; }
-
-      app.append(backLink("#/j/" + jid, journal.name));
-      app.append(h("h1", "", "New note"));
-
-      const form = document.createElement("form");
-      const titleInput = document.createElement("input");
-      titleInput.type = "text";
-      titleInput.placeholder = "Title";
-      titleInput.autocomplete = "off";
-      const textInput = document.createElement("textarea");
-      textInput.rows = 6;
-      textInput.placeholder = "Write something...";
-
-      const fileLabel = h("label", "file-row", "Pictures (optional, 5 MB each)");
-      const fileInput = document.createElement("input");
-      fileInput.type = "file";
-      fileInput.accept = IMAGE_TYPES;
-      fileInput.multiple = true;
-      fileLabel.append(fileInput);
-
-      const titleStyle = { font: "sans", size: 20, color: "", bold: true };
-      const bodyStyle = { font: "sans", size: 16, color: "" };
-      const styleBox = h("details");
-      styleBox.append(h("summary", "", "Style this note"));
-      styleBox.append(buildAllControls(
-        titleStyle, bodyStyle,
-        function (s) { applyTitle(titleInput, s); },
-        function (s) { applyText(textInput, s); },
-        function () {}
-      ));
-      applyTitle(titleInput, titleStyle);
-      applyText(textInput, bodyStyle);
-
-      const save = h("button", "primary", "Save note");
-      save.type = "submit";
-      const err = h("p", "error");
-      form.append(titleInput, textInput, styleBox, save);
-      app.append(form, err);
-
-      form.addEventListener("submit", async function (event) {
-        event.preventDefault();
-        err.textContent = "";
-        save.disabled = true;
-
-        const r = await api("/api/notes/", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: titleInput.value,
-            text: textInput.value,
-            journal_id: jid,
-            font: bodyStyle.font, size: bodyStyle.size, color: bodyStyle.color,
-            title_font: titleStyle.font, title_size: titleStyle.size,
-            title_color: titleStyle.color, title_bold: titleStyle.bold,
-          }),
-        });
-
-        if (!r.ok) {
-          err.textContent = (r.data && r.data.error) || "Couldn't save the note";
-          save.disabled = false;
-          return;
-        }
-
-        const files = Array.from(fileInput.files);
-        if (files.length) {
-          const msg = await uploadFiles(r.data.id, files);
-          if (msg) flash = "Note saved, but a picture failed. " + msg;
-        }
-        location.hash = "#/j/" + jid + "/n/" + r.data.id;
-      });
     }
 
     async function showNote(jid, nid) {
@@ -539,10 +531,6 @@
       const meta = h("div", "meta", new Date(note.created_at).toLocaleString());
       const body = h("div", "note-text", note.text);
       applyText(body, bodyStyle);
-      app.append(title, meta, body);
-
-      const err = h("p", "error", flash);
-      flash = "";
 
       const pics = h("div", "pics");
       for (const image of (note.images || [])) {
@@ -559,7 +547,31 @@
         wrap.append(img, rm);
         pics.append(wrap);
       }
-      app.append(pics);
+
+      const view = h("div");
+      view.append(title, meta, body, pics);
+      app.append(view);
+
+      const err = h("p", "error", flash);
+      flash = "";
+
+      const editForm = h("form");
+      editForm.hidden = true;
+      const editTitle = document.createElement("input");
+      editTitle.type = "text";
+      editTitle.value = note.title;
+      editTitle.autocomplete = "off";
+      const editText = document.createElement("textarea");
+      editText.rows = 8;
+      editText.value = note.text;
+      const saveEdit = h("button", "primary", "Save changes");
+      saveEdit.type = "submit";
+      const cancelEdit = h("button", "", "Cancel");
+      cancelEdit.type = "button";
+      const editActions = h("div", "actions");
+      editActions.append(saveEdit, cancelEdit);
+      editForm.append(editTitle, editText, editActions);
+      app.append(editForm);
 
       const controls = buildAllControls(
         titleStyle, bodyStyle,
@@ -582,31 +594,54 @@
       controls.hidden = true;
       app.append(controls);
 
-      const picInput = document.createElement("input");
-      picInput.type = "file";
-      picInput.accept = IMAGE_TYPES;
-      picInput.multiple = true;
-      picInput.hidden = true;
-      picInput.onchange = async function () {
-        const msg = await uploadFiles(note.id, Array.from(picInput.files));
-        if (msg) flash = msg;
-        showNote(jid, nid);
-      };
-
+      const editBtn = h("button", "", "Edit");
       const styleBtn = h("button", "", "Style");
-      styleBtn.onclick = function () { controls.hidden = !controls.hidden; };
-      const addPic = h("button", "", "Add picture");
-      addPic.onclick = function () { picInput.click(); };
       const del = h("button", "", "Delete note");
+      const actions = h("div", "actions");
+      actions.append(editBtn, styleBtn, del);
+      app.append(actions, err);
+
+      function stopEditing() {
+        editForm.hidden = true;
+        view.hidden = false;
+        actions.hidden = false;
+        controls.hidden = true;
+      }
+      editBtn.onclick = function () {
+        err.textContent = "";
+        view.hidden = true;
+        actions.hidden = true;
+        controls.hidden = true;
+        editForm.hidden = false;
+        editTitle.focus();
+      };
+      cancelEdit.onclick = function () {
+        editTitle.value = note.title;
+        editText.value = note.text;
+        err.textContent = "";
+        stopEditing();
+      };
+      editForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        err.textContent = "";
+        const r = await api("/api/notes/" + note.id, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: editTitle.value, text: editText.value }),
+        });
+        if (!r.ok) {
+          err.textContent = (r.data && r.data.error) || "Couldn't save your changes";
+          return;
+        }
+        showNote(jid, nid);
+      });
+
+      styleBtn.onclick = function () { controls.hidden = !controls.hidden; };
       del.onclick = async function () {
-        if (!window.confirm("Delete this note and its pictures?")) return;
+        if (!window.confirm("Delete this note?")) return;
         await api("/api/notes/" + note.id, { method: "DELETE" });
         location.hash = "#/j/" + jid;
       };
-
-      const actions = h("div", "actions");
-      actions.append(styleBtn, del);
-      app.append(actions, err);
     }
 
     function route() {
