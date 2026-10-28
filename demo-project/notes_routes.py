@@ -1,14 +1,24 @@
 import re
 from flask import Blueprint, jsonify, request
 from storage import (
-    get_notes, add_note, delete_note, journal_exists,
+    get_notes, add_note, delete_note, journal_owned,
     update_note_style, update_note_text,
 )
+from auth_routes import login_required, current_user_id
 
 notes_bp = Blueprint("notes", __name__)
 
 FONTS = {"sans", "serif", "book", "mono", "cursive", "rounded"}
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def json_body():
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else {}
+
+
+def clean_text(value):
+    return value.strip() if isinstance(value, str) else ""
 
 
 def valid_size(value, low, high):
@@ -31,7 +41,7 @@ def read_style(data):
     if not valid_size(title_size, 14, 48):
         return None, "Title size must be between 14 and 48"
     for c in (color, title_color):
-        if c and not COLOR_RE.match(c):
+        if c and not (isinstance(c, str) and COLOR_RE.match(c)):
             return None, "Invalid colour"
     if not isinstance(title_bold, bool):
         return None, "Invalid bold setting"
@@ -44,21 +54,24 @@ def read_style(data):
 
 
 @notes_bp.route("/")
+@login_required
 def list_notes():
     journal_id = request.args.get("journal_id", type=int)
-    return jsonify(get_notes(journal_id))
+    return jsonify(get_notes(current_user_id(), journal_id))
 
 
 @notes_bp.route("/", methods=["POST"])
+@login_required
 def create_note():
-    data = request.get_json()
-    title = (data.get("title") or "").strip()
-    text = (data.get("text") or "").strip()
+    data = json_body()
+    title = clean_text(data.get("title"))
+    text = clean_text(data.get("text"))
     journal_id = data.get("journal_id")
 
     if not title:
         return jsonify({"error": "Title cannot be empty"}), 400
-    if not isinstance(journal_id, int) or not journal_exists(journal_id):
+    if (not isinstance(journal_id, int) or isinstance(journal_id, bool)
+            or not journal_owned(current_user_id(), journal_id)):
         return jsonify({"error": "Choose a journal first"}), 400
 
     style, error = read_style(data)
@@ -69,28 +82,32 @@ def create_note():
 
 
 @notes_bp.route("/<int:note_id>", methods=["PATCH"])
+@login_required
 def edit_note(note_id):
-    data = request.get_json() or {}
-    title = (data.get("title") or "").strip()
-    text = (data.get("text") or "").strip()
+    data = json_body()
+    title = clean_text(data.get("title"))
+    text = clean_text(data.get("text"))
     if not title:
         return jsonify({"error": "Title cannot be empty"}), 400
-    if not update_note_text(note_id, title, text):
+    if not update_note_text(current_user_id(), note_id, title, text):
         return jsonify({"error": "Note not found"}), 404
     return jsonify({"id": note_id, "title": title, "text": text})
 
 
 @notes_bp.route("/<int:note_id>/style", methods=["PATCH"])
+@login_required
 def change_style(note_id):
-    style, error = read_style(request.get_json())
+    style, error = read_style(json_body())
     if error:
         return jsonify({"error": error}), 400
-    if not update_note_style(note_id, style):
+    if not update_note_style(current_user_id(), note_id, style):
         return jsonify({"error": "Note not found"}), 404
     return jsonify(style)
 
 
 @notes_bp.route("/<int:note_id>", methods=["DELETE"])
+@login_required
 def remove_note(note_id):
-    delete_note(note_id)
+    if not delete_note(current_user_id(), note_id):
+        return jsonify({"error": "Note not found"}), 404
     return jsonify({"deleted": note_id})

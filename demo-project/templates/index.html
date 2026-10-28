@@ -11,11 +11,20 @@
     }
     [hidden] { display: none !important; }
     body { font-family: system-ui, sans-serif; max-width: 480px; margin: 2rem auto; padding: 0 1rem; background: var(--bg); color: var(--text); }
-    input[type="text"], textarea, select { width: 100%; box-sizing: border-box; padding: 0.5rem; margin-bottom: 0.5rem; font: inherit; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
+    input[type="text"], input[type="password"], textarea, select { width: 100%; box-sizing: border-box; padding: 0.5rem; margin-bottom: 0.5rem; font: inherit; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 6px; }
     button { font: inherit; background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 0.35rem 0.8rem; cursor: pointer; }
     button.primary, .btn { background: var(--accent); color: var(--on); border-color: var(--accent); }
-    .btn { display: inline-block; border-radius: 6px; padding: 0.4rem 0.9rem; text-decoration: none; }
+    .btn { display: inline-block; border-radius: 6px; padding: 0.4rem 0.9rem; text-decoration: none; border: 1px solid var(--accent); }
+    .btn.secondary { background: var(--card); color: var(--text); border-color: var(--line); }
     .back { display: inline-block; margin-bottom: 0.6rem; color: var(--accent); text-decoration: none; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-size: 0.9rem; color: var(--sub); }
+    .hero { text-align: center; padding: 1.5rem 0 0.5rem; }
+    .hero p { color: var(--sub); }
+    .stack { display: grid; gap: 0.6rem; margin-top: 1.2rem; }
+    .stack .btn, .stack button { text-align: center; padding: 0.7rem 1rem; font-size: 1rem; }
+    label.field { display: block; margin-bottom: 0.4rem; color: var(--sub); font-size: 0.9rem; }
+    label.field input { margin-top: 0.2rem; }
+    .check { display: block; margin: 0.2rem 0 0.8rem; color: var(--sub); font-size: 0.9rem; }
     .list { display: grid; gap: 0.6rem; margin: 0.8rem 0; }
     .card { display: flex; gap: 0.7rem; align-items: center; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.8rem; color: var(--text); text-decoration: none; }
     .card:hover { border-color: var(--accent); }
@@ -49,6 +58,7 @@
   </style>
 </head>
 <body>
+  <header id="topbar" class="topbar" hidden></header>
   <main id="app"></main>
 
   <script>
@@ -82,9 +92,12 @@
     };
     const SWATCHES = ["", "#D85A30", "#E24B4A", "#BA7517", "#639922",
                       "#1D9E75", "#378ADD", "#7F77DD", "#D4537E", "#888780"];
+    const AUTH_PAGES = ["welcome", "login", "signup"];
 
     const app = document.getElementById("app");
+    const topbar = document.getElementById("topbar");
     let renderId = 0;
+    let currentUser = null;
 
     function h(tag, cls, text) {
       const e = document.createElement(tag);
@@ -98,6 +111,12 @@
         const r = await fetch(url, options);
         let data = null;
         try { data = await r.json(); } catch (e) {}
+        if (r.status === 401 && !url.startsWith("/api/auth/")) {
+          currentUser = null;
+          renderTopbar();
+          if (location.hash !== "#/welcome") { location.hash = "#/welcome"; } else { route(); }
+          return { ok: false, data: { error: "Please log in" } };
+        }
         return { ok: r.ok, data: data };
       } catch (e) {
         return { ok: false, data: { error: "Couldn't reach the server" } };
@@ -173,6 +192,22 @@
     }
 
     applyTheme();
+
+    function renderTopbar() {
+      topbar.textContent = "";
+      topbar.hidden = !currentUser;
+      if (!currentUser) return;
+      const who = h("span", "", "Signed in as ");
+      who.append(h("strong", "", currentUser.username));
+      const out = h("button", "", "Log out");
+      out.onclick = async function () {
+        await api("/api/auth/logout", { method: "POST" });
+        currentUser = null;
+        renderTopbar();
+        location.hash = "#/welcome";
+      };
+      topbar.append(who, out);
+    }
 
     function applyText(el, s) {
       el.style.fontFamily = FONTS[s.font] || FONTS.sans;
@@ -296,6 +331,115 @@
         font: bodyStyle.font, size: bodyStyle.size, color: bodyStyle.color,
         title_font: titleStyle.font, title_size: titleStyle.size,
         title_color: titleStyle.color, title_bold: titleStyle.bold,
+      });
+    }
+
+    function showWelcome() {
+      renderId++;
+      app.textContent = "";
+      const hero = h("div", "hero");
+      hero.append(
+        h("h1", "", "My journals"),
+        h("p", "", "Keep your notes organised in journals. Sign up to get started, or log in to continue.")
+      );
+      const stack = h("div", "stack");
+      const signup = h("a", "btn", "Sign up");
+      signup.href = "#/signup";
+      const login = h("a", "btn secondary", "Log in");
+      login.href = "#/login";
+      stack.append(signup, login);
+      app.append(hero, stack);
+    }
+
+    function showAuthForm(mode) {
+      renderId++;
+      app.textContent = "";
+      const signup = mode === "signup";
+
+      app.append(backLink("#/welcome", "Back"));
+      app.append(h("h1", "", signup ? "Sign up" : "Log in"));
+
+      const form = document.createElement("form");
+
+      const userLabel = h("label", "field", "Username");
+      const userInput = document.createElement("input");
+      userInput.type = "text";
+      userInput.autocomplete = "username";
+      userInput.autocapitalize = "none";
+      userInput.spellcheck = false;
+      userInput.maxLength = 30;
+      userLabel.append(userInput);
+      if (signup) {
+        userLabel.append(h("span", "sub", "3 to 30 characters: letters, numbers, dots, dashes, underscores."));
+      }
+
+      const passLabel = h("label", "field", "Password");
+      const passInput = document.createElement("input");
+      passInput.type = "password";
+      passInput.autocomplete = signup ? "new-password" : "current-password";
+      passInput.maxLength = 128;
+      passLabel.append(passInput);
+      if (signup) {
+        passLabel.append(h("span", "sub", "At least 8 characters."));
+      }
+
+      const showLabel = h("label", "check");
+      const showBox = document.createElement("input");
+      showBox.type = "checkbox";
+      showBox.onchange = function () {
+        passInput.type = showBox.checked ? "text" : "password";
+      };
+      showLabel.append(showBox, " Show password");
+
+      const submit = h("button", "primary", signup ? "Create account" : "Log in");
+      submit.type = "submit";
+      const err = h("p", "error");
+
+      form.append(userLabel, passLabel, showLabel, submit);
+      app.append(form, err);
+
+      const alt = h("p", "sub", signup ? "Already have an account? " : "No account yet? ");
+      const altLink = h("a", "", signup ? "Log in" : "Sign up");
+      altLink.href = signup ? "#/login" : "#/signup";
+      alt.append(altLink);
+      app.append(alt);
+
+      userInput.focus();
+
+      form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        err.textContent = "";
+        const username = userInput.value.trim();
+        const password = passInput.value;
+
+        if (!username) { err.textContent = "Enter your username"; return; }
+        if (!password) { err.textContent = "Enter your password"; return; }
+        if (signup) {
+          if (!/^[A-Za-z0-9_.-]{3,30}$/.test(username)) {
+            err.textContent = "Username must be 3 to 30 characters: letters, numbers, dots, dashes or underscores";
+            return;
+          }
+          if (password.length < 8) {
+            err.textContent = "Password must be at least 8 characters";
+            return;
+          }
+        }
+
+        submit.disabled = true;
+        const r = await api(signup ? "/api/auth/signup" : "/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: username, password: password }),
+        });
+        submit.disabled = false;
+
+        if (!r.ok) {
+          err.textContent = (r.data && r.data.error) || "Something went wrong. Try again.";
+          return;
+        }
+        currentUser = r.data.user;
+        renderTopbar();
+        location.hash = "#/";
       });
     }
 
@@ -666,7 +810,18 @@
 
     function route() {
       const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
-      if (parts[0] === "j" && Number.isInteger(Number(parts[1]))) {
+      const first = parts[0] || "";
+
+      if (!currentUser) {
+        if (!AUTH_PAGES.includes(first)) { location.hash = "#/welcome"; return; }
+        if (first === "login") return showAuthForm("login");
+        if (first === "signup") return showAuthForm("signup");
+        return showWelcome();
+      }
+
+      if (AUTH_PAGES.includes(first)) { location.hash = "#/"; return; }
+
+      if (first === "j" && Number.isInteger(Number(parts[1]))) {
         const jid = Number(parts[1]);
         if (parts[2] === "new") return showNewNote(jid);
         if (parts[2] === "n" && Number.isInteger(Number(parts[3]))) {
@@ -677,8 +832,15 @@
       return showHome();
     }
 
+    async function start() {
+      const r = await api("/api/auth/me");
+      currentUser = (r.ok && r.data && r.data.user) ? r.data.user : null;
+      renderTopbar();
+      route();
+    }
+
     window.addEventListener("hashchange", route);
-    route();
+    start();
   </script>
 </body>
 </html>

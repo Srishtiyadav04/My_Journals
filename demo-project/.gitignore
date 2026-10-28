@@ -4,3 +4,5 @@ __pycache__/
 .env
 data.json
 notes.db
+secret.key
+notes.db.backup
