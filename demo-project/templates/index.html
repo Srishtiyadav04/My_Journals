@@ -24,14 +24,9 @@
     .card .go { color: var(--sub); font-size: 1.2rem; }
     .sub { color: var(--sub); font-size: 0.85rem; }
     .snippet { color: var(--sub); font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .thumb { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; flex: none; }
     .note-title { line-height: 1.3; }
     .meta { font-size: 0.8rem; color: var(--sub); margin: 0.2rem 0 0.6rem; }
     .note-text { line-height: 1.5; margin-bottom: 0.8rem; white-space: pre-wrap; }
-    .pics { display: grid; gap: 0.6rem; margin-bottom: 0.8rem; }
-    .pic img { display: block; max-width: 100%; border-radius: 8px; margin-bottom: 0.3rem; }
-    .file-row { display: block; margin-bottom: 0.5rem; color: var(--sub); font-size: 0.9rem; }
-    .file-row input { display: block; margin-top: 0.2rem; max-width: 100%; }
     .actions { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.8rem; }
     .error { color: var(--err); min-height: 1.2em; margin: 0.2rem 0; }
     .row { display: flex; gap: 0.4rem; }
@@ -87,11 +82,9 @@
     };
     const SWATCHES = ["", "#D85A30", "#E24B4A", "#BA7517", "#639922",
                       "#1D9E75", "#378ADD", "#7F77DD", "#D4537E", "#888780"];
-    const IMAGE_TYPES = "image/png,image/jpeg,image/gif,image/webp";
 
     const app = document.getElementById("app");
     let renderId = 0;
-    let flash = "";
 
     function h(tag, cls, text) {
       const e = document.createElement(tag);
@@ -120,6 +113,10 @@
     function showMessage(text) {
       app.textContent = "";
       app.append(h("p", "error", text), backLink("#/", "All journals"));
+    }
+
+    function plural(n, word) {
+      return n + " " + word + (n === 1 ? "" : "s");
     }
 
     let theme = "light";
@@ -294,22 +291,12 @@
       return wrap;
     }
 
-    async function uploadFiles(noteId, files) {
-      for (const file of files) {
-        const form = new FormData();
-        form.append("note_id", noteId);
-        form.append("file", file);
-        const r = await api("/api/images/", { method: "POST", body: form });
-        if (!r.ok) {
-          const msg = (r.data && r.data.error) || "Upload failed";
-          return file.name + ": " + msg;
-        }
-      }
-      return "";
-    }
-
-    function plural(n, word) {
-      return n + " " + word + (n === 1 ? "" : "s");
+    function styleBody(titleStyle, bodyStyle) {
+      return JSON.stringify({
+        font: bodyStyle.font, size: bodyStyle.size, color: bodyStyle.color,
+        title_font: titleStyle.font, title_size: titleStyle.size,
+        title_color: titleStyle.color, title_bold: titleStyle.bold,
+      });
     }
 
     async function showHome() {
@@ -319,10 +306,13 @@
         api("/api/journals/"), api("/api/notes/"), api("/api/stats/"),
       ]);
       if (id !== renderId) return;
-      if (!j.ok) { showMessage("Couldn't load your journals. Refresh the page."); return; }
+      if (!j.ok || !Array.isArray(j.data)) {
+        showMessage("Couldn't load your journals. Refresh the page.");
+        return;
+      }
 
       const counts = {};
-      for (const note of n.data || []) {
+      for (const note of (Array.isArray(n.data) ? n.data : [])) {
         counts[note.journal_id] = (counts[note.journal_id] || 0) + 1;
       }
 
@@ -385,14 +375,15 @@
           plural(s.data.total_words, "word")));
       }
     }
-        async function showJournal(jid) {
+
+    async function showJournal(jid) {
       const id = ++renderId;
       app.textContent = "";
       const [j, n] = await Promise.all([
         api("/api/journals/"), api("/api/notes/?journal_id=" + jid),
       ]);
       if (id !== renderId) return;
-      const journal = ((j.data) || []).find(function (x) { return x.id === jid; });
+      const journal = (Array.isArray(j.data) ? j.data : []).find(function (x) { return x.id === jid; });
       if (!journal) { showMessage("That journal doesn't exist."); return; }
 
       app.append(backLink("#/", "All journals"));
@@ -472,35 +463,85 @@
       }
 
       for (const note of notes) {
-        try {
-          const a = h("a", "card");
-          a.href = "#/j/" + jid + "/n/" + note.id;
-
-          const noteImages = note.images || [];
-          if (noteImages.length) {
-            const t = document.createElement("img");
-            t.className = "thumb";
-            t.src = noteImages[0].url;
-            t.alt = "";
-            t.loading = "lazy";
-            a.append(t);
-          }
-
-          const text = note.text || "";
-          const snippet = text.length > 120 ? text.slice(0, 120) + "\u2026" : text;
-          const grow = h("div", "grow");
-          grow.append(
-            h("strong", "", note.title),
-            h("span", "sub", new Date(note.created_at).toLocaleString()),
-            h("div", "snippet", snippet)
-          );
-          a.append(grow, h("span", "go", "\u203A"));
-          list.append(a);
-        } catch (e) {
-          console.error(e);
-          list.append(h("p", "error", "Couldn't show note " + note.id));
-        }
+        const a = h("a", "card");
+        a.href = "#/j/" + jid + "/n/" + note.id;
+        const text = note.text || "";
+        const snippet = text.length > 120 ? text.slice(0, 120) + "\u2026" : text;
+        const grow = h("div", "grow");
+        grow.append(
+          h("strong", "", note.title),
+          h("span", "sub", new Date(note.created_at).toLocaleString()),
+          h("div", "snippet", snippet)
+        );
+        a.append(grow, h("span", "go", "\u203A"));
+        list.append(a);
       }
+    }
+
+    async function showNewNote(jid) {
+      const id = ++renderId;
+      app.textContent = "";
+      const j = await api("/api/journals/");
+      if (id !== renderId) return;
+      const journal = (Array.isArray(j.data) ? j.data : []).find(function (x) { return x.id === jid; });
+      if (!journal) { showMessage("That journal doesn't exist."); return; }
+
+      app.append(backLink("#/j/" + jid, journal.name));
+      app.append(h("h1", "", "New note"));
+
+      const form = document.createElement("form");
+      const titleInput = document.createElement("input");
+      titleInput.type = "text";
+      titleInput.placeholder = "Title";
+      titleInput.autocomplete = "off";
+      const textInput = document.createElement("textarea");
+      textInput.rows = 6;
+      textInput.placeholder = "Write something...";
+
+      const titleStyle = { font: "sans", size: 20, color: "", bold: true };
+      const bodyStyle = { font: "sans", size: 16, color: "" };
+      const styleBox = h("details");
+      styleBox.append(h("summary", "", "Style this note"));
+      styleBox.append(buildAllControls(
+        titleStyle, bodyStyle,
+        function (s) { applyTitle(titleInput, s); },
+        function (s) { applyText(textInput, s); },
+        function () {}
+      ));
+      applyTitle(titleInput, titleStyle);
+      applyText(textInput, bodyStyle);
+
+      const save = h("button", "primary", "Save note");
+      save.type = "submit";
+      const err = h("p", "error");
+      form.append(titleInput, textInput, styleBox, save);
+      app.append(form, err);
+
+      form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        err.textContent = "";
+        save.disabled = true;
+
+        const r = await api("/api/notes/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: titleInput.value,
+            text: textInput.value,
+            journal_id: jid,
+            font: bodyStyle.font, size: bodyStyle.size, color: bodyStyle.color,
+            title_font: titleStyle.font, title_size: titleStyle.size,
+            title_color: titleStyle.color, title_bold: titleStyle.bold,
+          }),
+        });
+
+        if (!r.ok) {
+          err.textContent = (r.data && r.data.error) || "Couldn't save the note";
+          save.disabled = false;
+          return;
+        }
+        location.hash = "#/j/" + jid + "/n/" + r.data.id;
+      });
     }
 
     async function showNote(jid, nid) {
@@ -510,9 +551,9 @@
         api("/api/journals/"), api("/api/notes/?journal_id=" + jid),
       ]);
       if (id !== renderId) return;
-      const journal = ((j.data) || []).find(function (x) { return x.id === jid; });
+      const journal = (Array.isArray(j.data) ? j.data : []).find(function (x) { return x.id === jid; });
       if (!journal) { showMessage("That journal doesn't exist."); return; }
-      const note = ((n.data) || []).find(function (x) { return x.id === nid; });
+      const note = (Array.isArray(n.data) ? n.data : []).find(function (x) { return x.id === nid; });
       if (!note) {
         app.append(h("p", "error", "That note doesn't exist."), backLink("#/j/" + jid, journal.name));
         return;
@@ -532,28 +573,11 @@
       const body = h("div", "note-text", note.text);
       applyText(body, bodyStyle);
 
-      const pics = h("div", "pics");
-      for (const image of (note.images || [])) {
-        const wrap = h("div", "pic");
-        const img = document.createElement("img");
-        img.src = image.url;
-        img.alt = "Picture in " + note.title;
-        img.loading = "lazy";
-        const rm = h("button", "", "Remove picture");
-        rm.onclick = async function () {
-          await api("/api/images/" + image.id, { method: "DELETE" });
-          showNote(jid, nid);
-        };
-        wrap.append(img, rm);
-        pics.append(wrap);
-      }
-
       const view = h("div");
-      view.append(title, meta, body, pics);
+      view.append(title, meta, body);
       app.append(view);
 
-      const err = h("p", "error", flash);
-      flash = "";
+      const err = h("p", "error");
 
       const editForm = h("form");
       editForm.hidden = true;
@@ -582,11 +606,7 @@
           const r = await api("/api/notes/" + note.id + "/style", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              font: bodyStyle.font, size: bodyStyle.size, color: bodyStyle.color,
-              title_font: titleStyle.font, title_size: titleStyle.size,
-              title_color: titleStyle.color, title_bold: titleStyle.bold,
-            }),
+            body: styleBody(titleStyle, bodyStyle),
           });
           if (!r.ok) err.textContent = (r.data && r.data.error) || "Couldn't save the style";
         }
