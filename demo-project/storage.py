@@ -1,8 +1,11 @@
-import sqlite3
+import json
 import os
+import sqlite3
 from datetime import datetime, timezone
 
-DB_FILE = os.path.join(os.path.dirname(__file__), "notes.db")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_FILE = os.environ.get("JOURNAL_DB") or os.path.join(BASE_DIR, "notes.db")
+UPLOAD_DIR = os.environ.get("JOURNAL_UPLOADS") or os.path.join(BASE_DIR, "uploads")
 
 STYLE_COLUMNS = {
     "font": "TEXT NOT NULL DEFAULT 'sans'",
@@ -14,6 +17,7 @@ STYLE_COLUMNS = {
     "title_bold": "INTEGER NOT NULL DEFAULT 1",
 }
 STYLE_KEYS = list(STYLE_COLUMNS)
+NOTE_COLUMNS = dict(STYLE_COLUMNS, rich="TEXT")
 
 JOURNALS_SQL = (
     "CREATE TABLE {} ("
@@ -35,6 +39,7 @@ def now_iso():
 
 
 def init_db():
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
     with get_db() as conn:
         conn.execute(
             "CREATE TABLE IF NOT EXISTS users ("
@@ -66,13 +71,34 @@ def init_db():
             "created_at TEXT NOT NULL)"
         )
         note_columns = {r["name"] for r in conn.execute("PRAGMA table_info(notes)")}
-        for name, definition in STYLE_COLUMNS.items():
+        for name, definition in NOTE_COLUMNS.items():
             if name not in note_columns:
                 conn.execute(f"ALTER TABLE notes ADD COLUMN {name} {definition}")
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS media ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "note_id INTEGER NOT NULL, "
+            "filename TEXT NOT NULL UNIQUE, "
+            "kind TEXT NOT NULL, "
+            "size INTEGER NOT NULL, "
+            "created_at TEXT NOT NULL)"
+        )
+
         conn.execute("CREATE INDEX IF NOT EXISTS idx_notes_journal ON notes (journal_id)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_journals_user ON journals (user_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_media_note ON media (note_id)")
 
+
+def remove_files(filenames):
+    for name in filenames:
+        try:
+            os.remove(os.path.join(UPLOAD_DIR, name))
+        except OSError:
+            pass
+
+
+# ---------- users ----------
 
 def create_user(username, password_hash):
     try:
@@ -112,6 +138,8 @@ def get_user_by_username(username):
         ).fetchone()
     return dict(row) if row else None
 
+
+# ---------- journals ----------
 
 def get_journals(user_id):
     with get_db() as conn:
@@ -159,54 +187,99 @@ def delete_journal(user_id, journal_id):
         ).fetchone()
         if owned is None:
             return False
+        files = [
+            r["filename"]
+            for r in conn.execute(
+                "SELECT m.filename FROM media m JOIN notes n ON n.id = m.note_id "
+                "WHERE n.journal_id = ?",
+                (journal_id,),
+            )
+        ]
+        conn.execute(
+            "DELETE FROM media WHERE note_id IN (SELECT id FROM notes WHERE journal_id = ?)",
+            (journal_id,),
+        )
         conn.execute("DELETE FROM notes WHERE journal_id = ?", (journal_id,))
         conn.execute("DELETE FROM journals WHERE id = ?", (journal_id,))
-        return True
+    remove_files(files)
+    return True
+
+
+# ---------- notes ----------
+
+def parse_rich(value):
+    if not value:
+        return None
+    try:
+        data = json.loads(value)
+    except ValueError:
+        return None
+    return data if isinstance(data, list) else None
 
 
 def get_notes(user_id, journal_id=None):
-    columns = "n.id, n.journal_id, n.title, n.text, n.created_at, " + ", ".join(
+    columns = "n.id, n.journal_id, n.title, n.text, n.rich, n.created_at, " + ", ".join(
         "n." + k for k in STYLE_KEYS
     )
-    query = (
-        f"SELECT {columns} FROM notes n "
-        "JOIN journals j ON j.id = n.journal_id WHERE j.user_id = ?"
-    )
+    scope = "j.user_id = ?"
     params = [user_id]
     if journal_id is not None:
-        query += " AND n.journal_id = ?"
+        scope += " AND n.journal_id = ?"
         params.append(journal_id)
-    query += " ORDER BY n.id DESC"
     with get_db() as conn:
-        rows = conn.execute(query, params).fetchall()
-    return [dict(r) for r in rows]
+        rows = conn.execute(
+            f"SELECT {columns} FROM notes n JOIN journals j ON j.id = n.journal_id "
+            f"WHERE {scope} ORDER BY n.id DESC",
+            params,
+        ).fetchall()
+        media_rows = conn.execute(
+            "SELECT m.id, m.note_id, m.kind FROM media m "
+            "JOIN notes n ON n.id = m.note_id JOIN journals j ON j.id = n.journal_id "
+            f"WHERE {scope} ORDER BY m.id",
+            params,
+        ).fetchall()
+
+    by_note = {}
+    for m in media_rows:
+        by_note.setdefault(m["note_id"], []).append({"id": m["id"], "kind": m["kind"]})
+
+    notes = []
+    for r in rows:
+        note = dict(r)
+        note["rich"] = parse_rich(note["rich"])
+        note["media"] = by_note.get(note["id"], [])
+        notes.append(note)
+    return notes
 
 
-def add_note(journal_id, title, text, style):
+def add_note(journal_id, title, text, rich, style):
     created_at = now_iso()
     columns = ", ".join(STYLE_KEYS)
     marks = ", ".join("?" for _ in STYLE_KEYS)
     values = [style[k] for k in STYLE_KEYS]
+    rich_json = json.dumps(rich, separators=(",", ":")) if rich else None
     with get_db() as conn:
         cur = conn.execute(
-            f"INSERT INTO notes (journal_id, title, text, created_at, {columns}) "
-            f"VALUES (?, ?, ?, ?, {marks})",
-            [journal_id, title, text, created_at] + values,
+            f"INSERT INTO notes (journal_id, title, text, rich, created_at, {columns}) "
+            f"VALUES (?, ?, ?, ?, ?, {marks})",
+            [journal_id, title, text, rich_json, created_at] + values,
         )
         return {
             "id": cur.lastrowid, "journal_id": journal_id, "title": title,
-            "text": text, "created_at": created_at, **style,
+            "text": text, "rich": rich or None, "media": [],
+            "created_at": created_at, **style,
         }
 
 
 OWNED_NOTE = "id = ? AND journal_id IN (SELECT id FROM journals WHERE user_id = ?)"
 
 
-def update_note_text(user_id, note_id, title, text):
+def update_note_text(user_id, note_id, title, text, rich):
+    rich_json = json.dumps(rich, separators=(",", ":")) if rich else None
     with get_db() as conn:
         cur = conn.execute(
-            f"UPDATE notes SET title = ?, text = ? WHERE {OWNED_NOTE}",
-            (title, text, note_id, user_id),
+            f"UPDATE notes SET title = ?, text = ?, rich = ? WHERE {OWNED_NOTE}",
+            (title, text, rich_json, note_id, user_id),
         )
         return cur.rowcount > 0
 
@@ -221,5 +294,74 @@ def update_note_style(user_id, note_id, style):
 
 def delete_note(user_id, note_id):
     with get_db() as conn:
-        cur = conn.execute(f"DELETE FROM notes WHERE {OWNED_NOTE}", (note_id, user_id))
-        return cur.rowcount > 0
+        owned = conn.execute(
+            f"SELECT 1 FROM notes WHERE {OWNED_NOTE}", (note_id, user_id)
+        ).fetchone()
+        if owned is None:
+            return False
+        files = [
+            r["filename"]
+            for r in conn.execute("SELECT filename FROM media WHERE note_id = ?", (note_id,))
+        ]
+        conn.execute("DELETE FROM media WHERE note_id = ?", (note_id,))
+        conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+    remove_files(files)
+    return True
+
+
+# ---------- media ----------
+
+def note_owned(user_id, note_id):
+    with get_db() as conn:
+        row = conn.execute(
+            f"SELECT 1 FROM notes WHERE {OWNED_NOTE}", (note_id, user_id)
+        ).fetchone()
+    return row is not None
+
+
+def media_count(note_id):
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM media WHERE note_id = ?", (note_id,)
+        ).fetchone()[0]
+
+
+def user_media_bytes(user_id):
+    with get_db() as conn:
+        return conn.execute(
+            "SELECT COALESCE(SUM(m.size), 0) FROM media m "
+            "JOIN notes n ON n.id = m.note_id JOIN journals j ON j.id = n.journal_id "
+            "WHERE j.user_id = ?",
+            (user_id,),
+        ).fetchone()[0]
+
+
+def add_media(note_id, filename, kind, size):
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO media (note_id, filename, kind, size, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (note_id, filename, kind, size, now_iso()),
+        )
+        return {"id": cur.lastrowid, "kind": kind}
+
+
+def get_media(user_id, media_id):
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT m.id, m.filename, m.kind FROM media m "
+            "JOIN notes n ON n.id = m.note_id JOIN journals j ON j.id = n.journal_id "
+            "WHERE m.id = ? AND j.user_id = ?",
+            (media_id, user_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def delete_media(user_id, media_id):
+    item = get_media(user_id, media_id)
+    if item is None:
+        return False
+    with get_db() as conn:
+        conn.execute("DELETE FROM media WHERE id = ?", (media_id,))
+    remove_files([item["filename"]])
+    return True

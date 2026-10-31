@@ -1,14 +1,15 @@
 import os
 import secrets
 from datetime import timedelta
-from flask import Flask, render_template, request
+from flask import Flask, jsonify, render_template, request
 from storage import init_db
 from auth_routes import auth_bp
 from notes_routes import notes_bp
 from journals_routes import journals_bp
+from media_routes import media_bp
 from stats_routes import stats_bp
 
-BASE_DIR = os.path.dirname(__file__)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def load_secret_key():
@@ -34,13 +35,20 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=os.environ.get("JOURNAL_PRODUCTION") == "1",
     PERMANENT_SESSION_LIFETIME=timedelta(days=14),
+    MAX_CONTENT_LENGTH=30 * 1024 * 1024,
 )
 init_db()
 
 app.register_blueprint(auth_bp, url_prefix="/api/auth")
 app.register_blueprint(notes_bp, url_prefix="/api/notes")
 app.register_blueprint(journals_bp, url_prefix="/api/journals")
+app.register_blueprint(media_bp, url_prefix="/api/media")
 app.register_blueprint(stats_bp, url_prefix="/api/stats")
+
+
+@app.errorhandler(413)
+def too_large(error):
+    return jsonify({"error": "That upload is too large"}), 413
 
 
 @app.after_request
@@ -48,7 +56,8 @@ def add_headers(response):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "same-origin")
-    if request.path.startswith("/api/"):
+    is_file = request.path.startswith("/api/media/") and request.path.endswith("/file")
+    if request.path.startswith("/api/") and not is_file:
         response.headers["Cache-Control"] = "no-store"
     return response
 

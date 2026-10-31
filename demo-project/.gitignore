@@ -6,3 +6,4 @@ data.json
 notes.db
 secret.key
 notes.db.backup
+uploads/

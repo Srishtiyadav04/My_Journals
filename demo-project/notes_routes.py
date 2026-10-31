@@ -11,6 +11,10 @@ notes_bp = Blueprint("notes", __name__)
 FONTS = {"sans", "serif", "book", "mono", "cursive", "rounded"}
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 
+MAX_TEXT = 20000
+MAX_RUNS = 2000
+RUN_KEYS = {"t", "b", "i", "u", "s", "h", "c", "f", "z"}
+
 
 def json_body():
     data = request.get_json(silent=True)
@@ -53,6 +57,59 @@ def read_style(data):
     }, None
 
 
+def clean_runs(value):
+    """Checks formatted text: a list of runs like {"t": "hi", "b": 1, "c": "#aabbcc"}."""
+    if not isinstance(value, list) or len(value) > MAX_RUNS:
+        return None, "Too much formatting in this note"
+    runs = []
+    total = 0
+    for item in value:
+        if not isinstance(item, dict) or set(item) - RUN_KEYS:
+            return None, "Invalid formatting"
+        t = item.get("t")
+        if not isinstance(t, str) or t == "":
+            return None, "Invalid formatting"
+        total += len(t)
+        run = {"t": t}
+        for key in ("b", "i", "u", "s"):
+            if key in item:
+                if item[key] not in (0, 1, True, False):
+                    return None, "Invalid formatting"
+                if item[key]:
+                    run[key] = 1
+        for key in ("h", "c"):
+            if item.get(key):
+                if not (isinstance(item[key], str) and COLOR_RE.match(item[key])):
+                    return None, "Invalid colour"
+                run[key] = item[key].lower()
+        if item.get("f"):
+            if item["f"] not in FONTS:
+                return None, "Unknown font"
+            run["f"] = item["f"]
+        if item.get("z"):
+            if not valid_size(item["z"], 10, 64):
+                return None, "Text size must be between 10 and 64"
+            run["z"] = item["z"]
+        runs.append(run)
+    if total > MAX_TEXT:
+        return None, "This note is too long (20,000 characters maximum)"
+    return runs, None
+
+
+def read_body(data):
+    """Returns (plain_text, runs_or_None, error). Formatted text wins when it is sent."""
+    if data.get("rich") is not None:
+        runs, error = clean_runs(data["rich"])
+        if error:
+            return None, None, error
+        text = "".join(r["t"] for r in runs).strip()
+        return text, (runs or None), None
+    text = clean_text(data.get("text"))
+    if len(text) > MAX_TEXT:
+        return None, None, "This note is too long (20,000 characters maximum)"
+    return text, None, None
+
+
 @notes_bp.route("/")
 @login_required
 def list_notes():
@@ -65,7 +122,6 @@ def list_notes():
 def create_note():
     data = json_body()
     title = clean_text(data.get("title"))
-    text = clean_text(data.get("text"))
     journal_id = data.get("journal_id")
 
     if not title:
@@ -74,11 +130,14 @@ def create_note():
             or not journal_owned(current_user_id(), journal_id)):
         return jsonify({"error": "Choose a journal first"}), 400
 
+    text, runs, error = read_body(data)
+    if error:
+        return jsonify({"error": error}), 400
     style, error = read_style(data)
     if error:
         return jsonify({"error": error}), 400
 
-    return jsonify(add_note(journal_id, title, text, style)), 201
+    return jsonify(add_note(journal_id, title, text, runs, style)), 201
 
 
 @notes_bp.route("/<int:note_id>", methods=["PATCH"])
@@ -86,12 +145,14 @@ def create_note():
 def edit_note(note_id):
     data = json_body()
     title = clean_text(data.get("title"))
-    text = clean_text(data.get("text"))
     if not title:
         return jsonify({"error": "Title cannot be empty"}), 400
-    if not update_note_text(current_user_id(), note_id, title, text):
+    text, runs, error = read_body(data)
+    if error:
+        return jsonify({"error": error}), 400
+    if not update_note_text(current_user_id(), note_id, title, text, runs):
         return jsonify({"error": "Note not found"}), 404
-    return jsonify({"id": note_id, "title": title, "text": text})
+    return jsonify({"id": note_id, "title": title, "text": text, "rich": runs})
 
 
 @notes_bp.route("/<int:note_id>/style", methods=["PATCH"])
