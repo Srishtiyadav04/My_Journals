@@ -1,1 +1,1 @@
-https://github.com/Srishtiyadav04/My_Journals.git
+https://mysite.pythonanywhere.com/#/
